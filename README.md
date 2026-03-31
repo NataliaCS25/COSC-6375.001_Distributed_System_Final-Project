@@ -15,3 +15,5 @@ Deep Learning: PyTorch
 Data Processing: Pandas, Scikit-learn (Min-Max Scaling)
 
 Architecture: Bidirectional LSTM + Self-Attention
+
+Overleaf Document: https://www.overleaf.com/1518385616qwmgpcwwfjzv#58bc45
