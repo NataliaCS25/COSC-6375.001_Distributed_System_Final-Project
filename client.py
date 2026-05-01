@@ -10,7 +10,6 @@ class ERCOTClient(fl.client.NumPyClient):
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.criterion = nn.MSELoss()
-        #self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
         # Drop the learning rate by half every 5 rounds
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.5)
@@ -39,8 +38,6 @@ class ERCOTClient(fl.client.NumPyClient):
                 
                 # Calculate the L2 difference between local and global weights
                 for name, param in self.model.named_parameters():
-                    # Note: You'll need a mapping if names don't match, 
-                    # but for this simple setup, we can use the list:
                     pass 
                 
                 # Simplified Proximal Loss implementation:
@@ -56,6 +53,8 @@ class ERCOTClient(fl.client.NumPyClient):
                 
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 self.optimizer.step()
+
+        self.scheduler.step()  # Step the learning rate scheduler
                 
         return self.get_parameters(config={}), len(self.train_loader.dataset), {}
 
@@ -72,5 +71,9 @@ class ERCOTClient(fl.client.NumPyClient):
 
         ai_rmse = np.sqrt(mean_squared_error(all_t, all_p))
         baseline_rmse = np.sqrt(mean_squared_error(all_t, np.zeros_like(all_t)))
-        #mse = mean_squared_error(all_t, all_p)
-        return float(ai_rmse), len(self.val_loader.dataset), {"mae": float(mean_absolute_error(all_t, all_p)), "rmse": float(ai_rmse), "base_rmse": float(baseline_rmse)}
+        mape = np.mean(np.abs((all_t - all_p) / (all_t + 1e-8))) * 100 # Avoid division by zero
+
+        # [RAI UPDATE] Calculate Normalized Mean Bias Error (NMBE) for directional robustness
+        nmbe = (np.sum(all_p - all_t) / (np.sum(all_t) + 1e-8)) * 100
+
+        return float(ai_rmse), len(self.val_loader.dataset), {"mae": float(mean_absolute_error(all_t, all_p)), "rmse": float(ai_rmse), "base_rmse": float(baseline_rmse), "mape": float(mape), "nmbe": float(nmbe)}
