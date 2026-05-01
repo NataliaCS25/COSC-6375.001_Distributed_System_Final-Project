@@ -19,20 +19,54 @@ class SelfAttention(nn.Module):
         return outputs, weights
 
 class BiLSTMForecaster(nn.Module):
-    def __init__(self, input_dim=10, hidden_dim=128, num_layers=2, forecast_horizon=24):
+    def __init__(self, input_dim=12, hidden_dim=128, num_layers=2, forecast_horizon=24):
         super().__init__()
-        # input_dim=9: [Res, Temp, Hr_Sin, Hr_Cos, Day_Sin, Day_Cos, 3 Region IDs]
+        # input_dim=12: [Lag_1, Lag_24, Lag_168, Rolling_Mean_24h, Temp, Hr_Sin, Hr_Cos, Day_Sin, Day_Cos, 3 Region IDs]
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, 
                             batch_first=True, bidirectional=True, dropout=0.2)
+        # Add LayerNorm to stabilize federated learning
+        self.layer_norm = nn.LayerNorm(hidden_dim * 2)
+
         self.attention = SelfAttention(hidden_dim * 2)
         self.dropout = nn.Dropout(0.3)
         self.fc1 = nn.Linear(hidden_dim * 2, hidden_dim)
-
         self.fc2 = nn.Linear(hidden_dim, forecast_horizon) 
 
     def forward(self, x):
         lstm_out, _ = self.lstm(x) # [batch, 168, hidden*2]
+        lstm_out = self.layer_norm(lstm_out) # Apply LayerNorm to LSTM outputs
         attn_out, weights = self.attention(lstm_out) # [batch, hidden*2]
         x = self.dropout(attn_out)
         x = F.relu(self.fc1(x))
         return self.fc2(x)
+    
+class StandardLSTMForecaster(nn.Module):
+    def __init__(self, input_dim=12, hidden_dim=128, num_layers=2, forecast_horizon=24):
+        super().__init__()
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, 
+                            batch_first=True, bidirectional=False, dropout=0.2)
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(0.3)
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.fc2 = nn.Linear(hidden_dim // 2, forecast_horizon) 
+
+    def forward(self, x):
+        lstm_out, _ = self.lstm(x) 
+        # Extract the output of the final time step
+        last_out = lstm_out[:, -1, :] 
+        last_out = self.layer_norm(last_out)
+        x = self.dropout(last_out)
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
+    
+class LinearForecaster(nn.Module):
+    def __init__(self, seq_len=24, input_dim=12, forecast_horizon=24):
+        super().__init__()
+        # Flatten the 3D sequence (24 steps * 12 features = 288) directly to 24 outputs
+        # No activation functions (ReLu, etc.) to keep it strictly linear
+        self.linear = nn.Linear(seq_len * input_dim, forecast_horizon)
+
+    def forward(self, x):
+        # Flatten input from [Batch, Seq, Feat] to [Batch, Seq*Feat]
+        x = x.reshape(x.size(0), -1) 
+        return self.linear(x)
